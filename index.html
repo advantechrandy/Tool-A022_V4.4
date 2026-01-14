@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>風扇氣動優化計算</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        :root {
+            --panel-bg: #1e293b;
+            --border-color: #475569; /* 稍微增亮邊框 */
+            --accent-blue: #38bdf8;
+            --accent-green: #4ade80;
+            --industrial-dark: #0f172a;
+        }
+        body { 
+            background-color: var(--industrial-dark); 
+            font-family: 'JetBrains Mono', 'Segoe UI', monospace; 
+            color: #f8fafc; /* 整體文字增亮 */
+        }
+        .industrial-border {
+            border: 1px solid var(--border-color);
+            position: relative;
+        }
+        .industrial-border::before {
+            content: "";
+            position: absolute;
+            top: 0; left: 0; width: 10px; height: 10px;
+            border-top: 2px solid var(--accent-blue);
+            border-left: 2px solid var(--accent-blue);
+        }
+        .panel-header {
+            background: linear-gradient(90deg, #1e293b 0%, #0f172a 100%);
+            border-bottom: 1px solid var(--border-color);
+            font-weight: bold;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            font-size: 0.75rem;
+            padding: 0.5rem 1rem;
+            color: var(--accent-blue);
+        }
+        /* 增亮標籤與描述 */
+        .slider-label { display: flex; justify-content: space-between; margin-bottom: 0.1rem; font-size: 0.75rem; color: #cbd5e1; }
+        .slider-desc { font-size: 0.65rem; color: #94a3b8; margin-bottom: 0.4rem; }
+        
+        input[type="range"] { 
+            width: 100%; height: 4px; background: #334155; border-radius: 0; appearance: none; cursor: pointer; 
+        }
+        input[type="range"]::-webkit-slider-thumb { 
+            appearance: none; width: 12px; height: 20px; background: var(--accent-blue); border: 1px solid white; border-radius: 2px;
+        }
+        
+        #canvas-container { 
+            background-image: linear-gradient(#1e293b 1px, transparent 1px), linear-gradient(90deg, #1e293b 1px, transparent 1px);
+            background-size: 30px 30px;
+            background-color: #020617;
+            border: 1px solid var(--border-color);
+        }
+        
+        .metric-value {
+            font-family: 'Courier New', Courier, monospace;
+            text-shadow: 0 0 10px rgba(56, 189, 248, 0.5);
+        }
+        
+        .status-dot {
+            height: 8px; width: 8px; border-radius: 50%; display: inline-block; margin-right: 6px;
+        }
+        .status-ok { background-color: var(--accent-green); box-shadow: 0 0 8px var(--accent-green); }
+        .status-warn { background-color: #fbbf24; box-shadow: 0 0 8px #fbbf24; }
+        .status-error { background-color: #ef4444; box-shadow: 0 0 8px #ef4444; }
+
+        .btn-industrial {
+            background: #0f172a;
+            border: 1px solid var(--accent-blue);
+            color: var(--accent-blue);
+            transition: all 0.2s;
+            clip-path: polygon(10% 0, 100% 0, 100% 70%, 90% 100%, 0 100%, 0 30%);
+            cursor: pointer;
+        }
+        .btn-industrial:hover {
+            background: var(--accent-blue);
+            color: #0f172a;
+        }
+        .theory-note {
+            border-left: 2px solid #475569;
+            padding-left: 1rem;
+        }
+        .analysis-block {
+            border-left: 2px solid var(--accent-blue);
+            padding-left: 0.75rem;
+        }
+    </style>
+</head>
+<body class="p-4">
+
+<div class="max-w-7xl mx-auto">
+    <!-- 頂部標題欄 -->
+    <header class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 border-b border-slate-600 pb-4">
+        <div>
+            <h1 class="text-2xl font-black text-white tracking-tighter flex items-center">
+                <span class="bg-blue-600 px-2 py-1 mr-2 text-sm italic">SYSTEM V4.4</span>
+                風扇扇葉氣動優化計算
+            </h1>
+            <p class="text-slate-300 text-xs mt-1">CREATED BY RANDY CHENE</p>
+        </div>
+        <div class="mt-4 md:mt-0 flex items-center space-x-4">
+            <div class="text-right">
+                <div class="text-[10px] text-slate-400 uppercase">系統狀態</div>
+                <div class="text-xs flex items-center text-slate-200"><span class="status-dot status-ok"></span>運作正常 (OPERATIONAL)</div>
+            </div>
+            <div class="h-10 w-[1px] bg-slate-600"></div>
+            <div class="text-right">
+                <div class="text-[10px] text-slate-400 uppercase">模擬負載</div>
+                <div class="text-xs text-blue-300">8.2%</div>
+            </div>
+        </div>
+    </header>
+
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
+        <!-- 左側控制面板 -->
+        <div class="lg:col-span-1 space-y-4">
+            <div class="industrial-border bg-slate-900 overflow-hidden">
+                <div class="panel-header">幾何輸入 / GEOMETRY</div>
+                <div class="p-4 space-y-4">
+                    <div>
+                        <div class="slider-label"><span>BLADE COUNT (N)</span><span id="val-blades" class="text-blue-300 font-bold">3</span></div>
+                        <div class="slider-desc">風扇扇葉的總數量 (建議 3-7 片)</div>
+                        <input type="range" id="input-blades" min="2" max="12" step="1" value="3">
+                    </div>
+
+                    <div>
+                        <div class="slider-label"><span>DIAMETER (mm)</span><span id="val-diameter" class="text-blue-300 font-bold">120</span></div>
+                        <div class="slider-desc">直徑範圍 (10mm - 200mm)</div>
+                        <input type="range" id="input-diameter" min="10" max="200" step="1" value="120">
+                    </div>
+
+                    <div>
+                        <div class="slider-label"><span>ROTATION (RPM)</span><span id="val-rpm" class="text-blue-300 font-bold">2500</span></div>
+                        <div class="slider-desc">每分鐘轉數 (最高 30,000 RPM)</div>
+                        <input type="range" id="input-rpm" min="100" max="30000" step="100" value="2500">
+                    </div>
+
+                    <div>
+                        <div class="slider-label"><span>CHORD LENGTH (mm)</span><span id="val-chord" class="text-blue-300 font-bold">20</span></div>
+                        <div class="slider-desc">扇葉切面長度 (影響推力與阻力)</div>
+                        <input type="range" id="input-chord" min="2" max="50" step="1" value="20">
+                    </div>
+
+                    <div>
+                        <div class="slider-label"><span>PITCH ANGLE (deg)</span><span id="val-pitch" class="text-blue-300 font-bold">20</span></div>
+                        <div class="slider-desc">建議範圍: 15° - 25° (最佳效率區)</div>
+                        <input type="range" id="input-pitch" min="0" max="60" step="1" value="20">
+                    </div>
+
+                    <button id="optimize-btn" class="w-full btn-industrial py-2 text-xs font-bold mt-2">
+                        自動優化參數 (RUN OPTIMIZER)
+                    </button>
+                </div>
+            </div>
+
+            <div class="industrial-border bg-slate-900 p-4">
+                <div class="text-[10px] text-slate-400 mb-2 uppercase tracking-widest">環境參數 (STANDARD)</div>
+                <div class="flex justify-between text-xs mb-1"><span class="text-slate-400">空氣密度:</span><span class="text-slate-100">1.225 kg/m³</span></div>
+                <div class="flex justify-between text-xs"><span class="text-slate-400">氣溫:</span><span class="text-slate-100">15.0 °C</span></div>
+            </div>
+        </div>
+
+        <!-- 中間 3D 顯示區 -->
+        <div class="lg:col-span-2 space-y-4">
+            <div id="canvas-container" class="w-full h-[500px] relative">
+                <div class="absolute top-0 left-0 w-full p-2 flex justify-between pointer-events-none">
+                    <div class="text-[10px] text-blue-400 font-mono italic">即時渲染視角 (REALTIME PREVIEW)</div>
+                    <div class="text-[10px] text-blue-400 font-mono">座標系: BLADE_CENTER_REL</div>
+                </div>
+            </div>
+            
+            <!-- 優化關鍵指標敘述 -->
+            <div class="industrial-border bg-slate-900 p-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="space-y-3">
+                        <div class="analysis-block">
+                            <div class="flex items-center space-x-2">
+                                <div id="status-indicator" class="status-dot status-ok"></div>
+                                <div class="text-[10px] text-slate-300 uppercase font-bold">即時分析報告 (ANALYSIS REPORT)</div>
+                            </div>
+                            <div id="optimization-text" class="text-xs text-slate-100 font-mono mt-2 leading-relaxed h-12">
+                                系統穩定，參數符合規範。
+                            </div>
+                        </div>
+                        <div class="theory-note mt-2">
+                            <div class="text-[10px] text-blue-300 font-bold uppercase tracking-wider mb-1">技術備註</div>
+                            <div class="text-[10px] text-slate-300 leading-relaxed">
+                                核心算法基於葉素理論（B.E.T.），將扇葉沿徑向積分計算升力。
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="bg-slate-800/50 p-3 border border-slate-700 rounded space-y-2">
+                        <div class="text-[10px] text-blue-300 font-bold uppercase">優化準則 (GUIDELINES)</div>
+                        <ul class="text-[10px] text-slate-100 space-y-1 list-disc pl-3">
+                            <li><strong class="text-white">尖端速度：</strong>不得超過音速 (340 m/s)，否則效率急降且噪音巨大。</li>
+                            <li><strong class="text-white">消耗功率：</strong>隨轉速立方增加，需確認馬達功率足以支撐。</li>
+                            <li><strong class="text-white">安裝角 (Pitch)：</strong>建議 15° - 25°，過高會造成氣流剝離與失速。</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右側數據面板 -->
+        <div class="lg:col-span-1 space-y-4">
+            <div class="industrial-border bg-slate-900 overflow-hidden">
+                <div class="panel-header">實時計算數據 / REALTIME DATA</div>
+                <div class="p-4 space-y-4">
+                    <div class="bg-black/40 p-3 border-l-2 border-blue-500">
+                        <div class="text-[10px] text-slate-300 mb-1 uppercase font-bold">預估推力 (THRUST)</div>
+                        <div class="text-[9px] text-slate-400 mb-2 italic">靜壓 (ΔP) ≈ 推力 (F) / 掃掠面積 (A)</div>
+                        <div class="text-3xl metric-value text-blue-400" id="res-thrust">0.000 N</div>
+                    </div>
+                    
+                    <div class="bg-black/40 p-3 border-l-2 border-orange-500">
+                        <div class="text-[10px] text-slate-300 mb-1 uppercase font-bold">耗功 (POWER)</div>
+                        <div class="text-3xl metric-value text-orange-400" id="res-power">0.00 W</div>
+                    </div>
+
+                    <div class="bg-black/40 p-3 border-l-2 border-emerald-500">
+                        <div class="text-[10px] text-slate-300 mb-1 uppercase font-bold">尖端線速度 (TIP VEL.)</div>
+                        <div class="text-3xl metric-value text-emerald-400" id="res-tip-speed">0.00 m/s</div>
+                    </div>
+
+                    <div class="bg-black/40 p-3 border-l-2 border-purple-500">
+                        <div class="text-[10px] text-slate-300 mb-1 uppercase font-bold">氣動效率 (EFFICIENCY)</div>
+                        <div class="text-[9px] text-slate-400 mb-2 italic">效率越高代表損耗越小，風量轉化越多。</div>
+                        <div class="text-3xl metric-value text-purple-400" id="res-efficiency">0%</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="industrial-border bg-slate-900 p-2 h-24 flex items-end space-x-[1px]">
+                <script>
+                    for(let i=0; i<30; i++) {
+                        document.write(`<div class="bg-blue-400/20 w-full" style="height: ${Math.random()*100}%"></div>`);
+                    }
+                </script>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const RHO = 1.225; 
+
+    // 阻擋右鍵選單
+    document.addEventListener('contextmenu', (event) => {
+        event.preventDefault();
+    });
+
+    function calculatePerformance() {
+        const numBlades = parseInt(document.getElementById('input-blades').value);
+        const diameterMM = parseFloat(document.getElementById('input-diameter').value);
+        const rpm = parseFloat(document.getElementById('input-rpm').value);
+        const chordMM = parseFloat(document.getElementById('input-chord').value);
+        const pitchDeg = parseFloat(document.getElementById('input-pitch').value);
+        
+        const diameter = diameterMM / 1000;
+        const chord = chordMM / 1000;
+        const radius = diameter / 2;
+        
+        const omega = (rpm * 2 * Math.PI) / 60; 
+        const tipSpeed = omega * radius;
+        
+        const alphaEff = pitchDeg * (Math.PI / 180) * 0.45; 
+        const Cl = 2 * Math.PI * alphaEff; 
+        const Cd = 0.025 + 0.12 * Math.pow(Cl, 2);
+
+        // 葉素理論簡化計算
+        const thrust = 0.5 * RHO * numBlades * chord * Cl * (Math.pow(omega, 2) * Math.pow(radius, 3) / 3);
+        const power = 0.5 * RHO * numBlades * chord * Cd * (Math.pow(omega, 3) * Math.pow(radius, 4) / 4);
+        
+        document.getElementById('val-blades').innerText = numBlades;
+        document.getElementById('val-diameter').innerText = diameterMM;
+        document.getElementById('val-rpm').innerText = rpm.toLocaleString();
+        document.getElementById('val-chord').innerText = chordMM;
+        document.getElementById('val-pitch').innerText = pitchDeg;
+
+        document.getElementById('res-thrust').innerText = thrust.toFixed(3) + " N";
+        document.getElementById('res-power').innerText = power.toFixed(2) + " W";
+        document.getElementById('res-tip-speed').innerText = tipSpeed.toFixed(1) + " m/s";
+        
+        let efficiency = (thrust > 0) ? (Math.min(98.5, (thrust / (power + 0.01)) * 35)) : 0;
+        document.getElementById('res-efficiency').innerText = efficiency.toFixed(1) + "%";
+
+        updateAnalysisReport(tipSpeed, pitchDeg, power);
+        updateFan3D(numBlades, radius, chord, pitchDeg);
+    }
+
+    function updateAnalysisReport(tipSpeed, pitch, power) {
+        let text = "";
+        let status = "status-ok";
+        
+        if (tipSpeed >= 340) {
+            text = "臨界警告：尖端速度已達音速 (" + tipSpeed.toFixed(0) + "m/s)。效率急劇下降且將產生巨大噪音與激波損傷。";
+            status = "status-error";
+        } else if (pitch > 25) {
+            text = "氣流警告：安裝角過高 (" + pitch + "°)。易導致氣流剝離（失速），效率損失嚴重。建議維持在 15°-25°。";
+            status = "status-warn";
+        } else if (pitch < 15 && pitch > 0) {
+            text = "效率提示：安裝角較低 (" + pitch + "°)。氣流平穩但推力較小，適合低負載運轉。";
+            status = "status-ok";
+        } else if (power > 500) {
+            text = "功耗注意：功耗隨轉速立方快速增長至 " + power.toFixed(0) + "W。請務必核對馬達額定功率是否足以支撐。";
+            status = "status-warn";
+        } else {
+            text = "狀態良好：各項指標均在工業優化建議範圍內。";
+            status = "status-ok";
+        }
+        
+        document.getElementById('optimization-text').innerText = text;
+        document.getElementById('status-indicator').className = `status-dot ${status}`;
+    }
+
+    let scene, camera, renderer, fanGroup;
+
+    function init3D() {
+        const container = document.getElementById('canvas-container');
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x020617);
+
+        camera = new THREE.PerspectiveCamera(50, container.clientWidth / container.clientHeight, 0.01, 100);
+        camera.position.set(0, 0, 1.2); 
+
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        container.appendChild(renderer.domElement);
+
+        const hLight = new THREE.HemisphereLight(0x38bdf8, 0x0f172a, 1.2);
+        scene.add(hLight);
+        const pLight = new THREE.PointLight(0x38bdf8, 1.5, 10);
+        pLight.position.set(2, 2, 2);
+        scene.add(pLight);
+
+        fanGroup = new THREE.Group();
+        scene.add(fanGroup);
+
+        let isDragging = false, prevX = 0, prevY = 0;
+        container.addEventListener('mousedown', () => isDragging = true);
+        window.addEventListener('mouseup', () => isDragging = false);
+        window.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+                fanGroup.rotation.y += (e.clientX - prevX) * 0.01;
+                fanGroup.rotation.x += (e.clientY - prevY) * 0.01;
+            }
+            prevX = e.clientX; prevY = e.clientY;
+        });
+
+        animate();
+    }
+
+    function updateFan3D(numBlades, radius, chord, pitch) {
+        while(fanGroup.children.length > 0) fanGroup.remove(fanGroup.children[0]);
+
+        const currentScale = 0.9 / (radius * 2);
+        fanGroup.scale.set(currentScale, currentScale, currentScale);
+
+        const hub = new THREE.Mesh(
+            new THREE.CylinderGeometry(radius * 0.2, radius * 0.22, radius * 0.25, 32),
+            new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.9, roughness: 0.1 })
+        );
+        hub.rotation.x = Math.PI / 2;
+        fanGroup.add(hub);
+
+        const pitchRad = pitch * (Math.PI / 180);
+        for (let i = 0; i < numBlades; i++) {
+            const pivot = new THREE.Group();
+            pivot.rotation.z = (i / numBlades) * Math.PI * 2;
+            
+            const blade = new THREE.Mesh(
+                new THREE.BoxGeometry(chord, radius * 0.8, 0.005),
+                new THREE.MeshStandardMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.8, emissive: 0x38bdf8, emissiveIntensity: 0.2 })
+            );
+            blade.position.y = radius * 0.52; 
+            blade.rotation.y = pitchRad; 
+            pivot.add(blade);
+            fanGroup.add(pivot);
+        }
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        const rpm = parseFloat(document.getElementById('input-rpm').value);
+        const visualSpeed = Math.min(rpm / 60, 50) * 0.04;
+        fanGroup.rotation.z += visualSpeed; 
+        renderer.render(scene, camera);
+    }
+
+    window.onload = () => {
+        init3D();
+        calculatePerformance();
+        ['input-blades', 'input-diameter', 'input-rpm', 'input-chord', 'input-pitch'].forEach(id => {
+            document.getElementById(id).addEventListener('input', calculatePerformance);
+        });
+        document.getElementById('optimize-btn').addEventListener('click', () => {
+            document.getElementById('input-pitch').value = 20;
+            document.getElementById('input-chord').value = Math.round(document.getElementById('input-diameter').value * 0.15);
+            calculatePerformance();
+        });
+    };
+    
+    window.onresize = () => {
+        const container = document.getElementById('canvas-container');
+        camera.aspect = container.clientWidth / container.clientHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(container.clientWidth, container.clientHeight);
+    };
+</script>
+
+</body>
+</html>
